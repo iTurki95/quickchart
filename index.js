@@ -99,7 +99,7 @@ function failPng(res, msg, statusCode = 500) {
     'X-quickchart-error': sanitizeErrorHeader(msg),
   });
   res.end(
-    text2png(Chart Error: ${msg}, {
+    text2png(`Chart Error: ${msg}`, {
       padding: 10,
       backgroundColor: '#fff',
     }),
