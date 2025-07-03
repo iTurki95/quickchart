@@ -1,4 +1,5 @@
 const path = require('path');
+
 const express = require('express');
 const javascriptStringify = require('javascript-stringify').stringify;
 const qs = require('qs');
@@ -15,17 +16,25 @@ const { toChartJs, parseSize } = require('./lib/google_image_charts');
 const { renderQr, DEFAULT_QR_SIZE } = require('./lib/qr');
 
 const app = express();
+
 const isDev = app.get('env') === 'development' || app.get('env') === 'test';
 
 app.set('query parser', (str) =>
   qs.parse(str, {
     decode(s) {
+      // Default express implementation replaces '+' with space. We don't want
+      // that. See https://github.com/expressjs/express/issues/3453
       return decodeURIComponent(s);
     },
   }),
 );
 
-app.use(express.json({ limit: process.env.EXPRESS_JSON_LIMIT || '100kb' }));
+app.use(
+  express.json({
+    limit: process.env.EXPRESS_JSON_LIMIT || '100kb',
+  }),
+);
+
 app.use(express.urlencoded());
 
 if (process.env.RATE_LIMIT_PER_MIN) {
@@ -40,9 +49,10 @@ if (process.env.RATE_LIMIT_PER_MIN) {
     onLimitReached: (req) => {
       logger.info('User hit rate limit!', req.ip);
     },
-    keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip,
+    keyGenerator: (req) => {
+      return req.headers['x-forwarded-for'] || req.ip;
+    },
   });
-
   app.use('/chart', limiter);
 }
 
@@ -57,21 +67,30 @@ app.post('/telemetry', (req, res) => {
   const qrCount = parseInt(req.body.qrCount, 10);
   const pid = req.body.pid;
 
-  if (chartCount && !isNaN(chartCount)) telemetry.receive(pid, 'chartCount', chartCount);
-  if (qrCount && !isNaN(qrCount)) telemetry.receive(pid, 'qrCount', qrCount);
+  if (chartCount && !isNaN(chartCount)) {
+    telemetry.receive(pid, 'chartCount', chartCount);
+  }
+  if (qrCount && !isNaN(qrCount)) {
+    telemetry.receive(pid, 'qrCount', qrCount);
+  }
 
   res.send({ success: true });
 });
 
 function utf8ToAscii(str) {
   const enc = new TextEncoder();
-  return Array.from(enc.encode(str))
+  const u8s = enc.encode(str);
+
+  return Array.from(u8s)
     .map((v) => String.fromCharCode(v))
     .join('');
 }
 
 function sanitizeErrorHeader(msg) {
-  return typeof msg === 'string' ? utf8ToAscii(msg).replace(/\r?\n|\r/g, '') : '';
+  if (typeof msg === 'string') {
+    return utf8ToAscii(msg).replace(/\r?\n|\r/g, '');
+  }
+  return '';
 }
 
 function failPng(res, msg, statusCode = 500) {
@@ -79,7 +98,12 @@ function failPng(res, msg, statusCode = 500) {
     'Content-Type': 'image/png',
     'X-quickchart-error': sanitizeErrorHeader(msg),
   });
-  res.end(text2png(`Chart Error: ${msg}`, { padding: 10, backgroundColor: '#fff' }));
+  res.end(
+    text2png(Chart Error: ${msg}, {
+      padding: 10,
+      backgroundColor: '#fff',
+    }),
+  );
 }
 
 function failSvg(res, msg, statusCode = 500) {
@@ -87,14 +111,18 @@ function failSvg(res, msg, statusCode = 500) {
     'Content-Type': 'image/svg+xml',
     'X-quickchart-error': sanitizeErrorHeader(msg),
   });
-  res.end(`
+  res.end(
 <svg viewBox="0 0 240 80" xmlns="http://www.w3.org/2000/svg">
-  <style>p { font-size: 8px; }</style>
+  <style>
+    p {
+      font-size: 8px;
+    }
+  </style>
   <foreignObject width="240" height="80"
    requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
     <p xmlns="http://www.w3.org/1999/xhtml">${msg}</p>
   </foreignObject>
-</svg>`);
+</svg>);
 }
 
 async function failPdf(res, msg) {
@@ -111,7 +139,10 @@ function renderChartToPng(req, res, opts) {
   opts.onRenderHandler = (buf) => {
     res
       .type('image/png')
-      .set({ 'Cache-Control': isDev ? 'no-cache' : 'public, max-age=604800' })
+      .set({
+        // 1 week cache
+        'Cache-Control': isDev ? 'no-cache' : 'public, max-age=604800',
+      })
       .send(buf)
       .end();
   };
@@ -123,7 +154,10 @@ function renderChartToSvg(req, res, opts) {
   opts.onRenderHandler = (buf) => {
     res
       .type('image/svg+xml')
-      .set({ 'Cache-Control': isDev ? 'no-cache' : 'public, max-age=604800' })
+      .set({
+        // 1 week cache
+        'Cache-Control': isDev ? 'no-cache' : 'public, max-age=604800',
+      })
       .send(buf)
       .end();
   };
@@ -134,9 +168,12 @@ async function renderChartToPdf(req, res, opts) {
   opts.failFn = failPdf;
   opts.onRenderHandler = async (buf) => {
     const pdfBuf = await getPdfBufferFromPng(buf);
+
     res.writeHead(200, {
       'Content-Type': 'application/pdf',
       'Content-Length': pdfBuf.length,
+
+      // 1 week cache
       'Cache-Control': isDev ? 'no-cache' : 'public, max-age=604800',
     });
     res.end(pdfBuf);
@@ -145,18 +182,23 @@ async function renderChartToPdf(req, res, opts) {
 }
 
 function doChartjsRender(req, res, opts) {
-  if (!opts.chart) return opts.failFn(res, 'You are missing variable `c` or `chart`');
+  if (!opts.chart) {
+    opts.failFn(res, 'You are missing variable c or chart');
+    return;
+  }
 
   const width = parseInt(opts.width, 10) || 500;
   const height = parseInt(opts.height, 10) || 300;
-  let untrustedInput = opts.chart;
 
+  let untrustedInput = opts.chart;
   if (opts.encoding === 'base64') {
+    // TODO(ian): Move this decoding up the call stack.
     try {
       untrustedInput = Buffer.from(opts.chart, 'base64').toString('utf8');
     } catch (err) {
       logger.warn('base64 malformed', err);
-      return opts.failFn(res, err);
+      opts.failFn(res, err);
+      return;
     }
   }
 
@@ -176,76 +218,120 @@ function doChartjsRender(req, res, opts) {
     });
 }
 
-function handleGChart(req, res) {
-  if (req.query.cht.startsWith('gv')) {
-    const format = req.query.chof;
-    const engine = req.query.cht.includes(':') ? req.query.cht.split(':')[1] : 'dot';
-    const opts = { format, engine };
+async function handleGraphviz(req, res, graphVizDef, opts) {
+  try {
+    const buf = await renderGraphviz(req.query.chl, opts);
+    res
+      .status(200)
+      .type(opts.format === 'png' ? 'image/png' : 'image/svg+xml')
+      .end(buf);
+  } catch (err) {
+    if (opts.format === 'png') {
+      failPng(res, Graph Error: ${err});
+    } else {
+      failSvg(res, Graph Error: ${err});
+    }
+  }
+}
 
+function handleGChart(req, res) {
+  // TODO(ian): Move these special cases into Google Image Charts-specific
+  // handler.
+  if (req.query.cht.startsWith('gv')) {
+    // Graphviz chart
+    const format = req.query.chof;
+    const engine = req.query.cht.indexOf(':') > -1 ? req.query.cht.split(':')[1] : 'dot';
+    const opts = {
+      format,
+      engine,
+    };
     if (req.query.chs) {
       const size = parseSize(req.query.chs);
       opts.width = size.width;
       opts.height = size.height;
     }
-
-    return handleGraphviz(req, res, req.query.chl, opts);
-  }
-
-  if (req.query.cht === 'qr') {
+    handleGraphviz(req, res, req.query.chl, opts);
+    return;
+  } else if (req.query.cht === 'qr') {
     const size = parseInt(req.query.chs.split('x')[0], 10);
     const qrData = req.query.chl;
     const chldVals = (req.query.chld || '').split('|');
     const ecLevel = chldVals[0] || 'L';
     const margin = chldVals[1] || 4;
-
-    return renderQr('png', 'UTF-8', qrData, {
-      margin,
+    const qrOpts = {
+      margin: margin,
       width: size,
       errorCorrectionLevel: ecLevel,
-    })
+    };
+
+    const format = 'png';
+    const encoding = 'UTF-8';
+    renderQr(format, encoding, qrData, qrOpts)
       .then((buf) => {
         res.writeHead(200, {
-          'Content-Type': 'image/png',
+          'Content-Type': format === 'png' ? 'image/png' : 'image/svg+xml',
           'Content-Length': buf.length,
+
+          // 1 week cache
           'Cache-Control': isDev ? 'no-cache' : 'public, max-age=604800',
         });
         res.end(buf);
       })
-      .catch((err) => failPng(res, err));
+      .catch((err) => {
+        failPng(res, err);
+      });
+
+    telemetry.count('qrCount');
+    return;
   }
 
   let converted;
   try {
     converted = toChartJs(req.query);
   } catch (err) {
-    logger.error(`GChart error: ${req.originalUrl}`);
-    return res.status(500).end('Unsupported chart configuration');
+    logger.error(GChart error: Could not interpret ${req.originalUrl});
+    res.status(500).end('Sorry, this chart configuration is not supported right now');
+    return;
+  }
+
+  if (req.query.format === 'chartjs-config') {
+    // Chart.js config
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+    });
+    res.end(javascriptStringify(converted.chart, undefined, 2));
+    return;
   }
 
   renderChartJs(
     converted.width,
     converted.height,
     converted.backgroundColor,
-    1.0,
-    '2.9.4',
-    undefined,
+    1.0 /* devicePixelRatio */,
+    '2.9.4' /* version */,
+    undefined /* format */,
     converted.chart,
   ).then((buf) => {
     res.writeHead(200, {
       'Content-Type': 'image/png',
       'Content-Length': buf.length,
+
+      // 1 week cache
       'Cache-Control': isDev ? 'no-cache' : 'public, max-age=604800',
     });
     res.end(buf);
   });
-
   telemetry.count('chartCount');
 }
 
 app.get('/chart', (req, res) => {
-  if (req.query.cht) return handleGChart(req, res);
+  if (req.query.cht) {
+    // This is a Google Image Charts-compatible request.
+    handleGChart(req, res);
+    return;
+  }
 
-  const format = (req.query.f || req.query.format || 'png').toLowerCase();
+  const outputFormat = (req.query.f || req.query.format || 'png').toLowerCase();
   const opts = {
     chart: req.query.c || req.query.chart,
     height: req.query.h || req.query.height,
@@ -254,18 +340,25 @@ app.get('/chart', (req, res) => {
     devicePixelRatio: req.query.devicePixelRatio,
     version: req.query.v || req.query.version,
     encoding: req.query.encoding || 'url',
-    format,
+    format: outputFormat,
   };
 
-  if (format === 'pdf') return renderChartToPdf(req, res, opts);
-  if (format === 'svg') return renderChartToSvg(req, res, opts);
-  if (format === 'png') return renderChartToPng(req, res, opts);
+  if (outputFormat === 'pdf') {
+    renderChartToPdf(req, res, opts);
+  } else if (outputFormat === 'svg') {
+    renderChartToSvg(req, res, opts);
+  } else if (!outputFormat || outputFormat === 'png') {
+    renderChartToPng(req, res, opts);
+  } else {
+    logger.error(Request for unsupported format ${outputFormat});
+    res.status(500).end(Unsupported format ${outputFormat});
+  }
 
-  res.status(500).end(`Unsupported format: ${format}`);
+  telemetry.count('chartCount');
 });
 
 app.post('/chart', (req, res) => {
-  const format = (req.body.f || req.body.format || 'png').toLowerCase();
+  const outputFormat = (req.body.f || req.body.format || 'png').toLowerCase();
   const opts = {
     chart: req.body.c || req.body.chart,
     height: req.body.h || req.body.height,
@@ -274,63 +367,91 @@ app.post('/chart', (req, res) => {
     devicePixelRatio: req.body.devicePixelRatio,
     version: req.body.v || req.body.version,
     encoding: req.body.encoding || 'url',
-    format,
+    format: outputFormat,
   };
 
-  if (format === 'pdf') return renderChartToPdf(req, res, opts);
-  if (format === 'svg') return renderChartToSvg(req, res, opts);
-  renderChartToPng(req, res, opts);
+  if (outputFormat === 'pdf') {
+    renderChartToPdf(req, res, opts);
+  } else if (outputFormat === 'svg') {
+    renderChartToSvg(req, res, opts);
+  } else {
+    renderChartToPng(req, res, opts);
+  }
+
+  telemetry.count('chartCount');
 });
 
 app.get('/qr', (req, res) => {
   const qrText = req.query.text;
-  if (!qrText) return failPng(res, 'Missing `text`');
+  if (!qrText) {
+    failPng(res, 'You are missing variable text');
+    return;
+  }
 
-  const format = req.query.format === 'svg' ? 'svg' : 'png';
+  let format = 'png';
+  if (req.query.format === 'svg') {
+    format = 'svg';
+  }
+
+  const { mode } = req.query;
+
   const margin = typeof req.query.margin === 'undefined' ? 4 : parseInt(req.query.margin, 10);
   const ecLevel = req.query.ecLevel || undefined;
   const size = Math.min(3000, parseInt(req.query.size, 10)) || DEFAULT_QR_SIZE;
+  const darkColor = req.query.dark || '000';
+  const lightColor = req.query.light || 'fff';
 
   const qrOpts = {
     margin,
     width: size,
     errorCorrectionLevel: ecLevel,
     color: {
-      dark: req.query.dark || '000',
-      light: req.query.light || 'fff',
+      dark: darkColor,
+      light: lightColor,
     },
   };
 
-  renderQr(format, req.query.mode, qrText, qrOpts)
+  renderQr(format, mode, qrText, qrOpts)
     .then((buf) => {
       res.writeHead(200, {
         'Content-Type': format === 'png' ? 'image/png' : 'image/svg+xml',
         'Content-Length': buf.length,
+
+        // 1 week cache
         'Cache-Control': isDev ? 'no-cache' : 'public, max-age=604800',
       });
       res.end(buf);
     })
-    .catch((err) => failPng(res, err));
+    .catch((err) => {
+      failPng(res, err);
+    });
+
+  telemetry.count('qrCount');
 });
 
 app.get('/gchart', handleGChart);
 
 app.get('/healthcheck', (req, res) => {
+  // A lightweight healthcheck endpoint.
   res.send({ success: true, version: packageJson.version });
 });
 
 app.get('/healthcheck/chart', (req, res) => {
+  // A heavier healthcheck endpoint that redirects to a unique chart.
   const labels = [...Array(5)].map(() => Math.random());
   const data = [...Array(5)].map(() => Math.random());
-  const chart = `
+  const template = 
 {
   type: 'bar',
   data: {
     labels: [${labels.join(',')}],
-    datasets: [{ data: [${data.join(',')}] }]
+    datasets: [{
+      data: [${data.join(',')}]
+    }]
   }
-}`;
-  res.redirect(`/chart?c=${chart}`);
+}
+;
+  res.redirect(/chart?c=${template});
 });
 
 const port = process.env.PORT || 3400;
@@ -338,25 +459,34 @@ const server = app.listen(port);
 
 const timeout = parseInt(process.env.REQUEST_TIMEOUT_MS, 10) || 5000;
 server.setTimeout(timeout);
-logger.info(`Listening on port ${port} (Timeout: ${timeout} ms)`);
+logger.info(Setting request timeout: ${timeout} ms);
+
+logger.info(NODE_ENV: ${process.env.NODE_ENV});
+logger.info(Listening on port ${port});
 
 if (!isDev) {
-  const shutdown = () => {
-    logger.info('Graceful shutdown...');
+  const gracefulShutdown = function gracefulShutdown() {
+    logger.info('Received kill signal, shutting down gracefully.');
     server.close(() => {
-      logger.info('Closed connections.');
+      logger.info('Closed out remaining connections.');
       process.exit();
     });
 
     setTimeout(() => {
-      logger.error('Force shutdown.');
+      logger.error('Could not close connections in time, forcefully shutting down');
       process.exit();
-    }, 10_000);
+    }, 10 * 1000);
   };
 
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
-  process.on('SIGABRT', () => logger.info('Caught SIGABRT'));
+  // listen for TERM signal .e.g. kill
+  process.on('SIGTERM', gracefulShutdown);
+
+  // listen for INT signal e.g. Ctrl-C
+  process.on('SIGINT', gracefulShutdown);
+
+  process.on('SIGABRT', () => {
+    logger.info('Caught SIGABRT');
+  });
 }
 
-module.exports = app;
+module.exports = app; 
