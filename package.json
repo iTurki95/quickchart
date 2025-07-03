@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "bunyan": "^1.8.12",
+    "chartjs-chart-radial-gauge": "^3.0.1",
     "canvas": "2.9.3",
     "canvas-5-polyfill": "^0.1.5",
     "chart.js": "^2.9.4",
