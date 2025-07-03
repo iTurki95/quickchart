@@ -111,7 +111,7 @@ function failSvg(res, msg, statusCode = 500) {
     'Content-Type': 'image/svg+xml',
     'X-quickchart-error': sanitizeErrorHeader(msg),
   });
-  res.end(
+  res.end(`
 <svg viewBox="0 0 240 80" xmlns="http://www.w3.org/2000/svg">
   <style>
     p {
@@ -122,7 +122,7 @@ function failSvg(res, msg, statusCode = 500) {
    requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
     <p xmlns="http://www.w3.org/1999/xhtml">${msg}</p>
   </foreignObject>
-</svg>);
+</svg>`);
 }
 
 async function failPdf(res, msg) {
@@ -183,7 +183,7 @@ async function renderChartToPdf(req, res, opts) {
 
 function doChartjsRender(req, res, opts) {
   if (!opts.chart) {
-    opts.failFn(res, 'You are missing variable c or chart');
+    opts.failFn(res, 'You are missing variable `c` or `chart`');
     return;
   }
 
@@ -227,9 +227,9 @@ async function handleGraphviz(req, res, graphVizDef, opts) {
       .end(buf);
   } catch (err) {
     if (opts.format === 'png') {
-      failPng(res, Graph Error: ${err});
+      failPng(res, `Graph Error: ${err}`);
     } else {
-      failSvg(res, Graph Error: ${err});
+      failSvg(res, `Graph Error: ${err}`);
     }
   }
 }
@@ -289,7 +289,7 @@ function handleGChart(req, res) {
   try {
     converted = toChartJs(req.query);
   } catch (err) {
-    logger.error(GChart error: Could not interpret ${req.originalUrl});
+    logger.error(`GChart error: Could not interpret ${req.originalUrl}`);
     res.status(500).end('Sorry, this chart configuration is not supported right now');
     return;
   }
@@ -350,8 +350,8 @@ app.get('/chart', (req, res) => {
   } else if (!outputFormat || outputFormat === 'png') {
     renderChartToPng(req, res, opts);
   } else {
-    logger.error(Request for unsupported format ${outputFormat});
-    res.status(500).end(Unsupported format ${outputFormat});
+    logger.error(`Request for unsupported format ${outputFormat}`);
+    res.status(500).end(`Unsupported format ${outputFormat}`);
   }
 
   telemetry.count('chartCount');
@@ -384,7 +384,7 @@ app.post('/chart', (req, res) => {
 app.get('/qr', (req, res) => {
   const qrText = req.query.text;
   if (!qrText) {
-    failPng(res, 'You are missing variable text');
+    failPng(res, 'You are missing variable `text`');
     return;
   }
 
@@ -440,7 +440,7 @@ app.get('/healthcheck/chart', (req, res) => {
   // A heavier healthcheck endpoint that redirects to a unique chart.
   const labels = [...Array(5)].map(() => Math.random());
   const data = [...Array(5)].map(() => Math.random());
-  const template = 
+  const template = `
 {
   type: 'bar',
   data: {
@@ -450,8 +450,8 @@ app.get('/healthcheck/chart', (req, res) => {
     }]
   }
 }
-;
-  res.redirect(/chart?c=${template});
+`;
+  res.redirect(`/chart?c=${template}`);
 });
 
 const port = process.env.PORT || 3400;
@@ -459,10 +459,10 @@ const server = app.listen(port);
 
 const timeout = parseInt(process.env.REQUEST_TIMEOUT_MS, 10) || 5000;
 server.setTimeout(timeout);
-logger.info(Setting request timeout: ${timeout} ms);
+logger.info(`Setting request timeout: ${timeout} ms`);
 
-logger.info(NODE_ENV: ${process.env.NODE_ENV});
-logger.info(Listening on port ${port});
+logger.info(`NODE_ENV: ${process.env.NODE_ENV}`);
+logger.info(`Listening on port ${port}`);
 
 if (!isDev) {
   const gracefulShutdown = function gracefulShutdown() {
