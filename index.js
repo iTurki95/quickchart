@@ -489,4 +489,4 @@ if (!isDev) {
   });
 }
 
-module.exports = app; 
+module.exports = app;
