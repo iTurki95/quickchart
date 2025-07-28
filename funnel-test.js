@@ -8,7 +8,7 @@ const {
   TrapezoidElement,
 } = require('chartjs-chart-funnel');
 
-// سجّل المكونات المطلوبة
+// سجل المكونات المطلوبة
 Chart.register(
   FunnelController,
   TrapezoidElement,
