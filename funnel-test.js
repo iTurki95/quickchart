@@ -8,28 +8,12 @@ const {
   TrapezoidElement,
 } = require('chartjs-chart-funnel');
 
-// سجل مكونات الفَنل + العناصر الأساسية
+// سجّل المكونات المطلوبة
 Chart.register(
   FunnelController,
   TrapezoidElement,
-  Chart.ArcElement,
-  Chart.BarElement,
-  Chart.LineElement,
-  Chart.PointElement,
-  Chart.LineController,
-  Chart.BarController,
-  Chart.PieController,
-  Chart.DoughnutController,
-  Chart.RadarController,
-  Chart.ScatterController,
-  Chart.BubbleController,
   Chart.CategoryScale,
   Chart.LinearScale,
-  Chart.RadialLinearScale,
-  Chart.TimeScale,
-  Chart.TimeSeriesScale,
-  Chart.Decimation,
-  Chart.Filler,
   Chart.Legend,
   Chart.Title,
   Chart.Tooltip
